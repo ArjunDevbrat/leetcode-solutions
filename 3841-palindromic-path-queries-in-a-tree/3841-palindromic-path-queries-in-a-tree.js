@@ -7,134 +7,163 @@ var palindromePath = function(n, edges, s, queries) {
         adj[v].push(u);
     }
 
-    const LOG = 17;
-    const parent = Array(n).fill(0);
-    const depth = Array(n).fill(0);
-    const tin = Array(n).fill(0);
-    const tout = Array(n).fill(0);
-    const mask = Array(n).fill(0);
-    let timer = 0;
+    const LOG = 16;
 
-    const stack = [[0, -1, 0]];
+    const parent = new Array(n).fill(-1);
+    const depth = new Array(n).fill(0);
+    const tin = new Array(n);
+    const tout = new Array(n);
+    const mask = new Array(n);
+
+    // Iterative DFS + Euler Tour
+    const order = [];
+    const stack = [0];
 
     while (stack.length) {
-        const [u, p, state] = stack.pop();
+        const u = stack.pop();
 
-        if (state === 0) {
-            parent[u] = p === -1 ? u : p;
-            tin[u] = timer++;
-            mask[u] = 1 << (s.charCodeAt(u) - 97);
+        tin[u] = order.length + 1;
+        order.push(u);
 
-            if (p !== -1) depth[u] = depth[p] + 1;
+        for (const v of adj[u]) {
+            if (v === parent[u]) continue;
 
-            stack.push([u, p, 1]);
-
-            for (let i = adj[u].length - 1; i >= 0; i--) {
-                const v = adj[u][i];
-                if (v !== p) stack.push([v, u, 0]);
-            }
-        } else {
-            tout[u] = timer;
+            parent[v] = u;
+            depth[v] = depth[u] + 1;
+            stack.push(v);
         }
     }
 
+    const size = new Array(n).fill(1);
+
+    for (let i = n - 1; i >= 0; i--) {
+        const u = order[i];
+
+        if (parent[u] !== -1) {
+            size[parent[u]] += size[u];
+        }
+
+        tout[u] = tin[u] + size[u] - 1;
+
+        mask[u] = 1 << (s.charCodeAt(u) - 97);
+    }
+
+    // Binary Lifting
     const up = Array.from(
         { length: LOG },
-        () => Array(n).fill(0)
+        () => new Int32Array(n).fill(-1)
     );
 
-    for (let u = 0; u < n; u++) {
-        up[0][u] = parent[u];
+    for (let i = 0; i < n; i++) {
+        up[0][i] = parent[i];
     }
 
     for (let j = 1; j < LOG; j++) {
-        for (let u = 0; u < n; u++) {
-            up[j][u] = up[j - 1][up[j - 1][u]];
+        for (let i = 0; i < n; i++) {
+            const p = up[j - 1][i];
+
+            if (p !== -1) {
+                up[j][i] = up[j - 1][p];
+            }
         }
     }
 
-    function lca(u, v) {
-        if (depth[u] < depth[v]) [u, v] = [v, u];
-
-        let diff = depth[u] - depth[v];
-
-        for (let j = 0; j < LOG; j++) {
-            if ((diff >> j) & 1) u = up[j][u];
+    function lca(a, b) {
+        if (depth[a] < depth[b]) {
+            [a, b] = [b, a];
         }
 
-        if (u === v) return u;
+        let diff = depth[a] - depth[b];
 
-        for (let j = LOG - 1; j >= 0; j--) {
-            if (up[j][u] !== up[j][v]) {
-                u = up[j][u];
-                v = up[j][v];
+        for (let j = 0; j < LOG; j++) {
+            if ((diff >> j) & 1) {
+                a = up[j][a];
             }
         }
 
-        return parent[u];
+        if (a === b) return a;
+
+        for (let j = LOG - 1; j >= 0; j--) {
+            if (up[j][a] !== up[j][b]) {
+                a = up[j][a];
+                b = up[j][b];
+            }
+        }
+
+        return parent[a];
     }
 
-    const bit = Array(n + 1).fill(0);
+    // Fenwick Tree with XOR range updates
+    class Fenwick {
+        constructor(n) {
+            this.n = n;
+            this.bit = new Int32Array(n + 2);
+        }
 
-    function add(i, val) {
-        for (i++; i <= n; i += i & -i) {
-            bit[i] ^= val;
+        update(i, val) {
+            while (i <= this.n) {
+                this.bit[i] ^= val;
+                i += i & -i;
+            }
+        }
+
+        query(i) {
+            let res = 0;
+
+            while (i > 0) {
+                res ^= this.bit[i];
+                i -= i & -i;
+            }
+
+            return res;
+        }
+
+        rangeUpdate(l, r, val) {
+            this.update(l, val);
+            this.update(r + 1, val);
         }
     }
 
-    function prefix(i) {
-        let res = 0;
-        for (i++; i > 0; i -= i & -i) {
-            res ^= bit[i];
-        }
-        return res;
-    }
+    const bit = new Fenwick(n + 1);
 
-    function rangeUpdate(l, r, val) {
-        add(l, val);
-        if (r < n) add(r, val);
-    }
-
-    function rootMask(u) {
-        return prefix(tin[u]);
-    }
-
+    // Initialize subtree range XOR
     for (let u = 0; u < n; u++) {
-        rangeUpdate(tin[u], tout[u], mask[u]);
+        bit.rangeUpdate(tin[u], tout[u], mask[u]);
     }
 
-    const answer = [];
-    const chars = s.split('');
+    const ans = [];
 
     for (const q of queries) {
-        const parts = q.split(' ');
+        const parts = q.split(" ");
 
-        if (parts[0] === 'update') {
+        if (parts[0] === "update") {
             const u = Number(parts[1]);
             const c = parts[2];
 
             const newMask = 1 << (c.charCodeAt(0) - 97);
-            const delta = mask[u] ^ newMask;
 
-            rangeUpdate(tin[u], tout[u], delta);
+            const diff = mask[u] ^ newMask;
+
+            bit.rangeUpdate(tin[u], tout[u], diff);
 
             mask[u] = newMask;
-            chars[u] = c;
-        } else {
+        } 
+        else {
             const u = Number(parts[1]);
             const v = Number(parts[2]);
+
             const w = lca(u, v);
 
             const pathMask =
-                rootMask(u) ^
-                rootMask(v) ^
+                bit.query(tin[u]) ^
+                bit.query(tin[v]) ^
                 mask[w];
 
-            answer.push(
+            ans.push(
                 (pathMask & (pathMask - 1)) === 0
             );
         }
     }
 
-    return answer;
+    return ans;
 };
